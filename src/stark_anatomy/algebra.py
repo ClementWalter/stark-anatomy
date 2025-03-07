@@ -1,3 +1,6 @@
+from typing import Union
+
+
 def xgcd(x, y):
     """
     Extended Euclidean Algorithm, see https://en.wikipedia.org/wiki/Extended_Euclidean_algorithm
@@ -32,11 +35,12 @@ class FieldElement:
     def __truediv__(self, right: "FieldElement") -> "FieldElement":
         return self.field.divide(self, right)
 
+    def __rtruediv__(self, left: int) -> "FieldElement":
+        left_element = FieldElement(left, self.field)
+        return self.field.divide(left_element, self)
+
     def __neg__(self) -> "FieldElement":
         return self.field.negate(self)
-
-    def inverse(self) -> "FieldElement":
-        return self.field.inverse(self)
 
     def __pow__(self, exponent: int) -> "FieldElement":
         acc = self.field.one
@@ -47,20 +51,25 @@ class FieldElement:
                 acc *= val
         return acc
 
-    def __eq__(self, other: "FieldElement") -> bool:
+    def __eq__(self, other: Union["FieldElement", int]) -> bool:
+        if isinstance(other, int):
+            other = FieldElement(other, self.field)
         return self.field.eq(self, other)
 
-    def __neq__(self, other: "FieldElement") -> bool:
-        return self.field.neq(self, other)
+    def __ne__(self, other: Union["FieldElement", int]) -> bool:
+        return not self.__eq__(other)
 
     def __str__(self) -> str:
         return str(self.value)
 
     def __bytes__(self) -> bytes:
-        return bytes(str(self).encode())
+        return str(self).encode()
 
-    def is_zero(self) -> bool:
-        return self.field.eq(self, self.field.zero)
+    def __repr__(self) -> str:
+        return f"{self.value % self.field.p}"
+
+    def __hash__(self) -> int:
+        return hash(self.value)
 
 
 class Field:
@@ -83,7 +92,7 @@ class Field:
     def eq(self, left: FieldElement, right: FieldElement) -> bool:
         return left.value % self.p == right.value % self.p
 
-    def neq(self, left: FieldElement, right: FieldElement) -> bool:
+    def ne(self, left: FieldElement, right: FieldElement) -> bool:
         return left.value % self.p != right.value % self.p
 
     def add(self, left: FieldElement, right: FieldElement) -> FieldElement:
@@ -96,13 +105,10 @@ class Field:
         return FieldElement((self.p - operand.value) % self.p, self)
 
     def inverse(self, operand: FieldElement) -> FieldElement:
-        if operand.is_zero():
-            raise ValueError("Cannot invert zero")
-        a, *_ = xgcd(operand.value, self.p)
-        return FieldElement(((a % self.p) + self.p) % self.p, self)
+        return self.divide(self.one, operand)
 
     def divide(self, left: FieldElement, right: FieldElement) -> FieldElement:
-        if right.is_zero():
+        if right == 0:
             raise ValueError("Cannot divide by zero")
         a, *_ = xgcd(right.value, self.p)
         return FieldElement(left.value * a % self.p, self)

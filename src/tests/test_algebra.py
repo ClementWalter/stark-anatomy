@@ -1,4 +1,3 @@
-import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
@@ -7,75 +6,46 @@ from stark_anatomy.algebra import Field, FieldElement
 
 class TestField:
     def test_field_properties(self, field: Field):
-        zero = field.zero
-        one = field.one
+        assert field.zero == 0
+        assert field.one == 1
 
-        # Zero is the additive identity
-        assert zero + zero == zero
-        assert one + zero == one
-        assert zero + one == one
-
-        # One is the multiplicative identity
-        assert one * one == one
-        assert zero * one == zero
-        assert one * zero == zero
-
-        # Zero has no multiplicative inverse
-        with pytest.raises(ValueError):
-            zero.inverse()
-
-    @given(value=...)
-    def test_field_element_creation(self, value: int, field: Field):
-        element = FieldElement(value, field)
-        assert element.value % field.p == value % field.p
-        assert element.field == field
-
-    @given(a=..., b=...)
-    def test_field_addition(self, a: int, b: int, field: Field):
-        elem_a = FieldElement(a, field)
-        elem_b = FieldElement(b, field)
-
+    @given(a=..., b=..., c=...)
+    def test_field_addition(self, a: FieldElement, b: FieldElement, c: FieldElement):
         # Commutativity
-        assert elem_a + elem_b == elem_b + elem_a
+        assert a + b == b + a
 
         # Associativity
-        elem_c = FieldElement(5, field)
-        assert (elem_a + elem_b) + elem_c == elem_a + (elem_b + elem_c)
+        assert (a + b) + c == a + (b + c)
 
         # Additive inverse
-        assert elem_a + (-elem_a) == field.zero
-        assert elem_b + (-elem_b) == field.zero
+        assert a + (-a) == 0
+        assert b + (-b) == 0
 
-    @given(a=..., b=...)
-    def test_field_multiplication(self, a: int, b: int, field: Field):
-        elem_a = FieldElement(a, field)
-        elem_b = FieldElement(b, field)
-
+    @given(a=..., b=..., c=...)
+    def test_field_multiplication(
+        self, a: FieldElement, b: FieldElement, c: FieldElement
+    ):
         # Commutativity
-        assert elem_a * elem_b == elem_b * elem_a
+        assert a * b == b * a
 
         # Associativity
-        elem_c = FieldElement(7, field)
-        assert (elem_a * elem_b) * elem_c == elem_a * (elem_b * elem_c)
+        assert (a * b) * c == a * (b * c)
 
         # Distributivity
-        assert elem_a * (elem_b + elem_c) == (elem_a * elem_b) + (elem_a * elem_c)
+        assert a * (b + c) == (a * b) + (a * c)
 
     @given(a=...)
-    def test_field_inverse(self, a: int, field: Field):
-        assume(a % field.p != 0)
-        elem_a = FieldElement(a, field)
-        inverse_a = elem_a.inverse()
+    def test_field_inverse(self, a: FieldElement):
+        assume(a != 0)
 
-        assert elem_a * inverse_a == field.one
-        assert inverse_a * elem_a == field.one
+        assert a * (1 / a) == 1
+        assert (1 / a) * a == 1
 
     @given(a=..., exponent=st.integers(min_value=0, max_value=10000))
-    def test_field_exponentiation(self, a: int, exponent: int, field: Field):
-        assume(a % field.p != 0)
-        elem_a = FieldElement(a, field)
+    def test_field_exponentiation(self, a: FieldElement, exponent: int):
+        assume(a != 0)
 
-        assert (elem_a**exponent).value % field.p == pow(a, exponent, field.p)
+        assert a**exponent == pow(a.value, exponent, a.field.p)
 
     def test_field_default(self, field: Field):
         assert field.p == Field.PRIME

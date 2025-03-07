@@ -1,7 +1,9 @@
+import math
 import os
 from functools import reduce
 from hashlib import blake2b
 
+from stark_anatomy.algebra import Field
 from stark_anatomy.fri import Fri
 from stark_anatomy.ip import ProofStream
 from stark_anatomy.merkle import Merkle
@@ -17,38 +19,36 @@ from stark_anatomy.univariate import Polynomial
 class FastStark:
     def __init__(
         self,
-        field,
-        expansion_factor,
-        num_colinearity_checks,
-        security_level,
-        num_registers,
-        num_cycles,
-        transition_constraints_degree=2,
+        field: Field,
+        expansion_factor: int,
+        num_colinearity_checks: int,
+        security_level: int,
+        num_registers: int,
+        num_cycles: int,
+        transition_constraints_degree: int = 2,
     ):
-        assert (
-            len(bin(field.p)) - 2 >= security_level
-        ), "p must have at least as many bits as security level"
-        assert (
-            expansion_factor & (expansion_factor - 1) == 0
-        ), "expansion factor must be a power of 2"
-        assert expansion_factor >= 4, "expansion factor must be 4 or greater"
-        assert (
-            num_colinearity_checks * 2 >= security_level
-        ), "number of colinearity checks must be at least half of security level"
+        if math.ceil(math.log2(field.p)) < security_level:
+            raise ValueError("p must have at least as many bits as security level")
+        if not (expansion_factor & (expansion_factor - 1) == 0):
+            raise ValueError("expansion factor must be a power of 2")
+        if expansion_factor < 4:
+            raise ValueError("expansion factor must be 4 or greater")
+        if num_colinearity_checks * 2 < security_level:
+            raise ValueError(
+                "number of colinearity checks must be at least half of security level"
+            )
 
         self.field = field
         self.expansion_factor = expansion_factor
         self.num_colinearity_checks = num_colinearity_checks
         self.security_level = security_level
-
         self.num_randomizers = 4 * num_colinearity_checks
-
         self.num_registers = num_registers
         self.original_trace_length = num_cycles
 
         self.randomized_trace_length = self.original_trace_length + self.num_randomizers
-        self.omicron_domain_length = 1 << len(
-            bin(self.randomized_trace_length * transition_constraints_degree)[2:]
+        self.omicron_domain_length = 1 << math.ceil(
+            math.log2(self.randomized_trace_length * transition_constraints_degree)
         )
         self.fri_domain_length = self.omicron_domain_length * expansion_factor
 
@@ -56,7 +56,7 @@ class FastStark:
         self.omega = self.field.primitive_nth_root(self.fri_domain_length)
         self.omicron = self.field.primitive_nth_root(self.omicron_domain_length)
         self.omicron_domain = [
-            self.omicron ^ i for i in range(self.omicron_domain_length)
+            self.omicron**i for i in range(self.omicron_domain_length)
         ]
 
         self.fri = Fri(
@@ -102,29 +102,29 @@ class FastStark:
         md = max(self.transition_quotient_degree_bounds(transition_constraints))
         return (1 << (len(bin(md)[2:]))) - 1
 
-    def boundary_zerofiers(self, boundary):
+    def boundary_zerofiers(self, boundary_constraints):
         zerofiers = []
         for s in range(self.num_registers):
-            points = [self.omicron ^ c for c, r, v in boundary if r == s]
+            points = [self.omicron**c for c, r, v in boundary_constraints if r == s]
             zerofiers = zerofiers + [Polynomial.zerofier_domain(points)]
         return zerofiers
 
-    def boundary_interpolants(self, boundary):
+    def boundary_interpolants(self, boundary_constraints):
         interpolants = []
         for s in range(self.num_registers):
-            points = [(c, v) for c, r, v in boundary if r == s]
-            domain = [self.omicron ^ c for c, v in points]
+            points = [(c, v) for c, r, v in boundary_constraints if r == s]
+            domain = [self.omicron**c for c, v in points]
             values = [v for c, v in points]
-            interpolants = interpolants + [
-                Polynomial.interpolate_domain(domain, values)
-            ]
+            interpolants = interpolants + [Polynomial.interpolate(domain, values)]
         return interpolants
 
-    def boundary_quotient_degree_bounds(self, randomized_trace_length, boundary):
+    def boundary_quotient_degree_bounds(
+        self, randomized_trace_length, boundary_constraints
+    ):
         randomized_trace_degree = randomized_trace_length - 1
         return [
-            randomized_trace_degree - bz.degree()
-            for bz in self.boundary_zerofiers(boundary)
+            randomized_trace_degree - bz.degree
+            for bz in self.boundary_zerofiers(boundary_constraints)
         ]
 
     def sample_weights(self, number, randomness):
@@ -137,7 +137,7 @@ class FastStark:
         self,
         trace,
         transition_constraints,
-        boundary,
+        boundary_constraints,
         transition_zerofier,
         transition_zerofier_codeword,
         proof_stream=None,
@@ -153,7 +153,7 @@ class FastStark:
             ]
 
         # interpolate
-        trace_domain = [self.omicron ^ i for i in range(len(trace))]
+        trace_domain = [self.omicron**i for i in range(len(trace))]
         trace_polynomials = []
         for s in range(self.num_registers):
             single_trace = [trace[c][s] for c in range(len(trace))]
@@ -166,8 +166,8 @@ class FastStark:
         # subtract boundary interpolants and divide out boundary zerofiers
         boundary_quotients = []
         for s in range(self.num_registers):
-            interpolant = self.boundary_interpolants(boundary)[s]
-            zerofier = self.boundary_zerofiers(boundary)[s]
+            interpolant = self.boundary_interpolants(boundary_constraints)[s]
+            zerofier = self.boundary_zerofiers(boundary_constraints)[s]
             quotient = (trace_polynomials[s] - interpolant) / zerofier
             boundary_quotients += [quotient]
 
@@ -230,7 +230,7 @@ class FastStark:
         )
 
         assert [
-            tq.degree() for tq in transition_quotients
+            tq.degree for tq in transition_quotients
         ] == self.transition_quotient_degree_bounds(
             transition_constraints
         ), "transition quotient degrees do not match with expectation"
@@ -246,14 +246,16 @@ class FastStark:
                 max_degree
                 - self.transition_quotient_degree_bounds(transition_constraints)[i]
             )
-            terms += [(x ^ shift) * transition_quotients[i]]
+            terms += [(x**shift) * transition_quotients[i]]
         for i in range(self.num_registers):
             terms += [boundary_quotients[i]]
             shift = (
                 max_degree
-                - self.boundary_quotient_degree_bounds(len(trace), boundary)[i]
+                - self.boundary_quotient_degree_bounds(
+                    len(trace), boundary_constraints
+                )[i]
             )
-            terms += [(x ^ shift) * boundary_quotients[i]]
+            terms += [(x**shift) * boundary_quotients[i]]
 
         # take weighted sum
         # combination = sum(weights[i] * terms[i] for all i)
@@ -307,12 +309,12 @@ class FastStark:
         self,
         proof,
         transition_constraints,
-        boundary,
+        boundary_constraints,
         transition_zerofier_root,
         proof_stream=None,
     ):
         # infer trace length from boundary conditions
-        original_trace_length = 1 + max(c for c, r, v in boundary)
+        original_trace_length = 1 + max(c for c, r, v in boundary_constraints)
         randomized_trace_length = original_trace_length + self.num_randomizers
 
         # deserialize with right proof stream
@@ -321,9 +323,9 @@ class FastStark:
         proof_stream = proof_stream.deserialize(proof)
 
         # get Merkle roots of boundary quotient codewords
-        boundary_quotient_roots = []
-        for _ in range(self.num_registers):
-            boundary_quotient_roots = boundary_quotient_roots + [proof_stream.pull()]
+        boundary_quotient_roots = [
+            proof_stream.pull() for _ in range(self.num_registers)
+        ]
 
         # get Merkle root of randomizer polynomial
         randomizer_root = proof_stream.pull()
@@ -332,7 +334,7 @@ class FastStark:
         weights = self.sample_weights(
             1
             + 2 * len(transition_constraints)
-            + 2 * len(self.boundary_interpolants(boundary)),
+            + 2 * len(self.boundary_interpolants(boundary_constraints)),
             proof_stream.verifier_fiat_shamir(),
         )
 
@@ -390,16 +392,16 @@ class FastStark:
             current_index = indices[i]  # do need i
 
             # get trace values by applying a correction to the boundary quotient values (which are the leafs)
-            domain_current_index = self.generator * (self.omega ^ current_index)
+            domain_current_index = self.generator * (self.omega**current_index)
             next_index = (
                 current_index + self.expansion_factor
             ) % self.fri.domain_length
-            domain_next_index = self.generator * (self.omega ^ next_index)
+            domain_next_index = self.generator * (self.omega**next_index)
             current_trace = [self.field.zero for s in range(self.num_registers)]
             next_trace = [self.field.zero for s in range(self.num_registers)]
             for s in range(self.num_registers):
-                zerofier = self.boundary_zerofiers(boundary)[s]
-                interpolant = self.boundary_interpolants(boundary)[s]
+                zerofier = self.boundary_zerofiers(boundary_constraints)[s]
+                interpolant = self.boundary_interpolants(boundary_constraints)[s]
 
                 current_trace[s] = leafs[s][current_index] * zerofier.evaluate(
                     domain_current_index
@@ -425,17 +427,17 @@ class FastStark:
                     self.max_degree(transition_constraints)
                     - self.transition_quotient_degree_bounds(transition_constraints)[s]
                 )
-                terms += [quotient * (domain_current_index ^ shift)]
+                terms += [quotient * (domain_current_index**shift)]
             for s in range(self.num_registers):
                 bqv = leafs[s][current_index]  # boundary quotient value
                 terms += [bqv]
                 shift = (
                     self.max_degree(transition_constraints)
                     - self.boundary_quotient_degree_bounds(
-                        randomized_trace_length, boundary
+                        randomized_trace_length, boundary_constraints
                     )[s]
                 )
-                terms += [bqv * (domain_current_index ^ shift)]
+                terms += [bqv * (domain_current_index**shift)]
             combination = reduce(
                 lambda a, b: a + b,
                 [terms[j] * weights[j] for j in range(len(terms))],

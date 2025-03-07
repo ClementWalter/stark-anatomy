@@ -22,8 +22,8 @@ class TestFri:
         omega = field.primitive_nth_root(initial_codeword_length)
         generator = field.generator()
 
-        assert omega ^ (1 << log_codeword_length) == field.one
-        assert omega ^ (1 << (log_codeword_length - 1)) != field.one
+        assert omega ** (1 << log_codeword_length) == field.one
+        assert omega ** (1 << (log_codeword_length - 1)) != field.one
 
         fri = Fri(
             generator,
@@ -34,7 +34,7 @@ class TestFri:
         )
 
         polynomial = Polynomial([FieldElement(i, field) for i in range(degree + 1)])
-        domain = [omega ^ i for i in range(initial_codeword_length)]
+        domain = [omega**i for i in range(initial_codeword_length)]
 
         codeword = polynomial.evaluate_domain(domain)
 
@@ -44,7 +44,7 @@ class TestFri:
         points = []
         assert fri.verify(proof_stream, points)
 
-        assert all(polynomial.evaluate(omega ^ x) == y for x, y in points)
+        assert all(polynomial.evaluate(omega**x) == y for x, y in points)
 
         # disturb then test for failure
         for i in range(0, degree // 3):

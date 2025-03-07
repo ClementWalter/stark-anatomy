@@ -2,17 +2,17 @@ from hashlib import blake2b
 
 from stark_anatomy.algebra import FieldElement
 from stark_anatomy.merkle import Merkle
-from stark_anatomy.univariate import Polynomial, test_colinearity
+from stark_anatomy.univariate import Polynomial
 
 
 class Fri:
     def __init__(
         self,
-        offset,
-        omega,
-        initial_domain_length,
-        expansion_factor,
-        num_colinearity_tests,
+        offset: FieldElement,
+        omega: FieldElement,
+        initial_domain_length: int,
+        expansion_factor: int,
+        num_colinearity_tests: int,
     ):
         self.offset = offset
         self.omega = omega
@@ -63,7 +63,7 @@ class Fri:
         return indices
 
     def eval_domain(self):
-        return [self.offset * (self.omega ^ i) for i in range(self.domain_length)]
+        return [self.offset * (self.omega**i) for i in range(self.domain_length)]
 
     def commit(self, codeword, proof_stream):
         one = self.field.one
@@ -78,7 +78,7 @@ class Fri:
 
             # make sure omega has the right order
             assert (
-                omega ^ (N - 1) == omega.inverse()
+                omega ** (N - 1) == 1 / omega
             ), "error in commit: omega does not have the right order!"
 
             # compute and send Merkle root
@@ -97,16 +97,16 @@ class Fri:
 
             # split and fold
             codeword = [
-                two.inverse()
-                * (
-                    (one + alpha / (offset * (omega ^ i))) * codeword[i]
-                    + (one - alpha / (offset * (omega ^ i))) * codeword[N // 2 + i]
+                (
+                    (one + alpha / (offset * (omega**i))) * codeword[i]
+                    + (one - alpha / (offset * (omega**i))) * codeword[N // 2 + i]
                 )
+                / two
                 for i in range(N // 2)
             ]
 
-            omega = omega ^ 2
-            offset = offset ^ 2
+            omega = omega**2
+            offset = offset**2
 
         # send last codeword
         proof_stream.push(codeword)
@@ -187,31 +187,26 @@ class Fri:
         last_omega = omega
         last_offset = offset
         for _ in range(self.num_rounds() - 1):
-            last_omega = last_omega ^ 2
-            last_offset = last_offset ^ 2
+            last_omega = last_omega**2
+            last_offset = last_offset**2
 
         # assert that last_omega has the right order
-        assert last_omega.inverse() == last_omega ^ (
+        assert 1 / last_omega == last_omega ** (
             len(last_codeword) - 1
         ), "omega does not have right order"
 
         # compute interpolant
-        last_domain = [
-            last_offset * (last_omega ^ i) for i in range(len(last_codeword))
-        ]
-        poly = Polynomial.interpolate_domain(last_domain, last_codeword)
-        # coefficients = intt(last_omega, last_codeword)
-        # poly = Polynomial(coefficients).scale(last_offset.inverse())
-
+        last_domain = [last_offset * (last_omega**i) for i in range(len(last_codeword))]
+        poly = Polynomial.interpolate(last_domain, last_codeword)
         # verify by  evaluating
         assert (
             poly.evaluate_domain(last_domain) == last_codeword
         ), "re-evaluated codeword does not match original!"
-        if poly.degree() > degree:
+        if poly.degree > degree:
             print(
                 "last codeword does not correspond to polynomial of low enough degree"
             )
-            print("observed degree:", poly.degree())
+            print("observed degree:", poly.degree)
             print("but should be:", degree)
             return False
 
@@ -250,10 +245,10 @@ class Fri:
                     polynomial_values += [(a_indices[s], ay), (b_indices[s], by)]
 
                 # colinearity check
-                ax = offset * (omega ^ a_indices[s])
-                bx = offset * (omega ^ b_indices[s])
+                ax = offset * (omega ** a_indices[s])
+                bx = offset * (omega ** b_indices[s])
                 cx = alphas[r]
-                if not test_colinearity([(ax, ay), (bx, by), (cx, cy)]):
+                if not Polynomial.is_colinear([(ax, ay), (bx, by), (cx, cy)]):
                     print("colinearity check failure")
                     return False
 
@@ -273,8 +268,8 @@ class Fri:
                     return False
 
             # square omega and offset to prepare for next round
-            omega = omega ^ 2
-            offset = offset ^ 2
+            omega = omega**2
+            offset = offset**2
 
         # all checks passed
         return True
