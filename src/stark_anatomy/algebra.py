@@ -1,4 +1,7 @@
 def xgcd(x, y):
+    """
+    Extended Euclidean Algorithm, see https://en.wikipedia.org/wiki/Extended_Euclidean_algorithm
+    """
     old_r, r = (x, y)
     old_s, s = (1, 0)
     old_t, t = (0, 1)
@@ -35,11 +38,10 @@ class FieldElement:
     def inverse(self) -> "FieldElement":
         return self.field.inverse(self)
 
-    # modular exponentiation -- be sure to encapsulate in parentheses!
-    def __xor__(self, exponent: int) -> "FieldElement":
+    def __pow__(self, exponent: int) -> "FieldElement":
         acc = self.field.one
         val = self
-        for i in bin(exponent)[2:][::-1]:
+        for i in bin(exponent)[2:]:
             acc *= acc
             if i != "0":
                 acc *= val
@@ -94,12 +96,15 @@ class Field:
         return FieldElement((self.p - operand.value) % self.p, self)
 
     def inverse(self, operand: FieldElement) -> FieldElement:
-        a, b, g = xgcd(operand.value, self.p)
+        if operand.is_zero():
+            raise ValueError("Cannot invert zero")
+        a, *_ = xgcd(operand.value, self.p)
         return FieldElement(((a % self.p) + self.p) % self.p, self)
 
     def divide(self, left: FieldElement, right: FieldElement) -> FieldElement:
-        assert not right.is_zero(), "divide by zero"
-        a, b, g = xgcd(right.value, self.p)
+        if right.is_zero():
+            raise ValueError("Cannot divide by zero")
+        a, *_ = xgcd(right.value, self.p)
         return FieldElement(left.value * a % self.p, self)
 
     @staticmethod
@@ -120,8 +125,8 @@ class Field:
         root = FieldElement(85408008396924667383611388730472331217, self)
         order = 1 << 119
         while order != n:
-            root = root ^ 2
-            order = order / 2
+            root = root**2
+            order = order // 2
         return root
 
     def sample(self, byte_array: bytes) -> FieldElement:
