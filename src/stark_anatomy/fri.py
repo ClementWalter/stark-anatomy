@@ -1,53 +1,87 @@
+import math
+from collections import namedtuple
 from hashlib import blake2b
+from typing import List, cast
 
 from stark_anatomy.algebra import FieldElement
+from stark_anatomy.ip import ProofStream
 from stark_anatomy.merkle import Merkle
-from stark_anatomy.univariate import Polynomial, test_colinearity
+from stark_anatomy.univariate import Polynomial
+
+# Type for colinearity check commitments
+Codewords = namedtuple("Codewords", ["a", "b", "c"])
+MerkleProofs = namedtuple("MerkleProof", ["a", "b", "c"])
+ColinearityCheck = namedtuple("ColinearityCheck", ["codewords", "proofs"])
+
+
+class FriError(Exception):
+    pass
 
 
 class Fri:
     def __init__(
         self,
-        offset,
-        omega,
-        initial_domain_length,
-        expansion_factor,
-        num_colinearity_tests,
+        offset: FieldElement,
+        omega: FieldElement,
+        domain_length: int,
+        expansion_factor: int,
+        num_colinearity_tests: int,
     ):
         self.offset = offset
         self.omega = omega
-        self.domain_length = initial_domain_length
+        self.domain_length = domain_length
         self.field = omega.field
         self.expansion_factor = expansion_factor
         self.num_colinearity_tests = num_colinearity_tests
 
-        assert self.num_rounds() >= 1, "cannot do FRI with less than one round"
+        if self.num_rounds < 1:
+            raise ValueError("cannot do FRI with less than one round")
 
+        if self.omega**self.domain_length != 1:
+            raise ValueError("omega does not have the right order")
+
+        if self.domain_length <= self.expansion_factor:
+            raise ValueError("domain length must be at least expansion factor")
+
+        if self.domain_length <= 4 * self.num_colinearity_tests:
+            raise ValueError("domain length must be at least 4 * num_colinearity_tests")
+
+    @property
     def num_rounds(self):
-        codeword_length = self.domain_length
-        num_rounds = 0
-        while (
-            codeword_length > self.expansion_factor
-            and 4 * self.num_colinearity_tests < codeword_length
-        ):
-            codeword_length /= 2
-            num_rounds += 1
-        return num_rounds
+        """
+        Compute the number of folding rounds of FRI.
+
+        Given the fact that each round halves the domain length, we have
+        len(initial_domain) = 2**num_rounds * len(final_domain).
+        """
+        return math.ceil(
+            math.log2(
+                self.domain_length
+                / max(self.expansion_factor, 4 * self.num_colinearity_tests)
+            )
+        )
 
     @staticmethod
-    def sample_index(byte_array, size):
+    def sample_index(seed: bytes, size: int) -> int:
         acc = 0
-        for b in byte_array:
-            acc = (acc << 8) ^ int(b)
+        for b in seed:
+            acc = (acc << 8) ^ b
         return acc % size
 
-    def sample_indices(self, seed, size, reduced_size, number):
-        assert (
-            number <= reduced_size
-        ), f"cannot sample more indices than available in last codeword; requested: {number}, available: {reduced_size}"
-        assert (
-            number <= 2 * reduced_size
-        ), "not enough entropy in indices wrt last codeword"
+    @staticmethod
+    def sample_indices(
+        seed: bytes, size: int, reduced_size: int, number: int
+    ) -> list[int]:
+        """
+        Sample `number` distinct indices from `size`-sized domain,
+        where the indices are also distinct when reduced modulo `reduced_size`.
+        """
+        if number > reduced_size:
+            raise ValueError(
+                f"cannot sample more indices than available in last codeword; requested: {number}, available: {reduced_size}"
+            )
+        if number > 2 * reduced_size:
+            raise ValueError("not enough entropy in indices wrt last codeword")
 
         indices = []
         reduced_indices = []
@@ -62,88 +96,101 @@ class Fri:
 
         return indices
 
-    def eval_domain(self):
-        return [self.offset * (self.omega ^ i) for i in range(self.domain_length)]
+    @property
+    def domain(self) -> List[FieldElement]:
+        """
+        The domain of the FRI.
 
-    def commit(self, codeword, proof_stream):
-        one = self.field.one
-        two = FieldElement(2, self.field)
-        omega = self.omega
-        offset = self.offset
+        This is the set of points at which the polynomial is evaluated.
+        """
+        return [self.offset * self.omega**i for i in range(self.domain_length)]
+
+    def commit(self, codeword: List[FieldElement], proof_stream: ProofStream):
+        """
+        Commit the codeword to the proof stream.
+
+        Folding is done by splitting the codeword into odd and even parts of the polynomial.
+
+        f*(x) = 1/2(f(x) + f(-x)) + 1/2 * alpha * (f(x) - f(-x)) / x
+              = 1/2( (1 + alpha / x) * f(x) + (1 - alpha / x) * f(-x) )
+
+        Due to the fact that -1 = omega**n/2, negative values are simply values with offset
+        n/2 in the domain:
+
+        f*(omega**(2*i)) = 1/2( (1 + alpha / omega**i) * f(omega**i) + (1 - alpha / omega**i) * f(-omega**i) )
+                         = 1/2( (1 + alpha / omega**i) * f(omega**i) + (1 + alpha / omega**(n/2 + i) * f(omega**(n/2 + i)) )
+        """
+        if len(self.domain) != len(codeword):
+            raise ValueError("initial codeword length does not match domain length")
+
+        domain = self.domain
         codewords = []
 
         # for each round
-        for r in range(self.num_rounds()):
-            N = len(codeword)
+        for _ in range(self.num_rounds):
 
-            # make sure omega has the right order
-            assert (
-                omega ^ (N - 1) == omega.inverse()
-            ), "error in commit: omega does not have the right order!"
+            # add to list of codewords
+            codewords += [codeword]
 
-            # compute and send Merkle root
-            root = Merkle.commit(codeword)
-            proof_stream.push(root)
-
-            # prepare next round, but only if necessary
-            if r == self.num_rounds() - 1:
-                break
+            # commit the codeword
+            proof_stream.push(Merkle.commit(codeword))
 
             # get challenge
             alpha = self.field.sample(proof_stream.prover_fiat_shamir())
 
-            # collect codeword
-            codewords += [codeword]
-
-            # split and fold
-            codeword = [
-                two.inverse()
-                * (
-                    (one + alpha / (offset * (omega ^ i))) * codeword[i]
-                    + (one - alpha / (offset * (omega ^ i))) * codeword[N // 2 + i]
-                )
-                for i in range(N // 2)
+            # compute weights
+            weights = [
+                (alpha / omega + 1) * word for omega, word in zip(domain, codeword)
             ]
 
-            omega = omega ^ 2
-            offset = offset ^ 2
+            # split and fold
+            domain = domain[::2]
+            n = len(domain)
+            codeword = [
+                (positive + negative) / 2
+                for positive, negative in zip(weights[:n], weights[n:])
+            ]
 
-        # send last codeword
-        proof_stream.push(codeword)
-
-        # collect last codeword too
-        codewords = codewords + [codeword]
+        # commit the last codeword
+        proof_stream.push(codewords[-1])
 
         return codewords
 
-    def query(self, current_codeword, next_codeword, c_indices, proof_stream):
-        # infer a and b indices
-        a_indices = [index for index in c_indices]
-        b_indices = [index + len(current_codeword) // 2 for index in c_indices]
+    def query(
+        self,
+        current_codeword: List[FieldElement],
+        next_codeword: List[FieldElement],
+        c_indices: List[int],
+        proof_stream: ProofStream,
+    ):
+        """
+        Commit whatever is required to allow the verifier to perform the colinearity checks
+        for the current codeword and the next codeword.
 
-        # reveal leafs
-        for s in range(self.num_colinearity_tests):
-            proof_stream.push(
-                (
-                    current_codeword[a_indices[s]],
-                    current_codeword[b_indices[s]],
-                    next_codeword[c_indices[s]],
-                )
+        A = (omega**i, f(omega**i))
+        B = (-omega**i, f(-omega**i)) = (omega**(n/2 + i), f(omega**(n/2 + i)))
+        C = (alpha, f*(omega**i*2))
+
+        A and C are at the same index (both are omega**i) while B is shifted by n/2
+        because -1 = omega**n/2.
+        """
+        for i in c_indices:
+            codewords = Codewords(
+                a=current_codeword[i],
+                b=current_codeword[i + len(current_codeword) // 2],
+                c=next_codeword[i],
             )
+            proofs = MerkleProofs(
+                a=Merkle.open(i, current_codeword),
+                b=Merkle.open(i + len(current_codeword) // 2, current_codeword),
+                c=Merkle.open(i, next_codeword),
+            )
+            proof_stream.push(ColinearityCheck(codewords, proofs))
 
-        # reveal authentication paths
-        for s in range(self.num_colinearity_tests):
-            proof_stream.push(Merkle.open(a_indices[s], current_codeword))
-            proof_stream.push(Merkle.open(b_indices[s], current_codeword))
-            proof_stream.push(Merkle.open(c_indices[s], next_codeword))
-
-        return a_indices + b_indices
-
-    def prove(self, codeword, proof_stream):
-        assert self.domain_length == len(
-            codeword
-        ), "initial codeword length does not match length of initial codeword"
-
+    def prove(self, codeword: List[FieldElement], proof_stream: ProofStream):
+        """
+        Commit the codeword to the proof stream and add colinearity checks.
+        """
         # commit phase
         codewords = self.commit(codeword, proof_stream)
 
@@ -154,127 +201,104 @@ class Fri:
             len(codewords[-1]),
             self.num_colinearity_tests,
         )
-        indices = [index for index in top_level_indices]
 
         # query phase
-        for i in range(len(codewords) - 1):
-            indices = [index % (len(codewords[i]) // 2) for index in indices]  # fold
-            self.query(codewords[i], codewords[i + 1], indices, proof_stream)
+        indices = top_level_indices
+        for current_codeword, next_codeword in zip(codewords[:-1], codewords[1:]):
+            self.query(current_codeword, next_codeword, indices, proof_stream)
+            indices = [index % (len(next_codeword) // 2) for index in indices]
 
         return top_level_indices
 
-    def verify(self, proof_stream, polynomial_values):
-        omega = self.omega
-        offset = self.offset
+    def verify(self, proof_stream):
+        """
+        Verify the proof, i.e. mainly unwind the prover's computation in `prove()`, pulling from
+        instead of pushing to the proof stream.
+        """
 
-        # extract all roots and alphas
+        # Unwind `commit()`
         roots = []
         alphas = []
-        for _ in range(self.num_rounds()):
+        for _ in range(self.num_rounds):
             roots += [proof_stream.pull()]
             alphas += [self.field.sample(proof_stream.verifier_fiat_shamir())]
-
-        # extract last codeword
         last_codeword = proof_stream.pull()
 
         # check if it matches the given root
         if roots[-1] != Merkle.commit(last_codeword):
-            print("last codeword is not well formed")
-            return False
+            raise FriError("last codeword is not well formed")
 
-        # check if it is low degree
-        degree = (len(last_codeword) // self.expansion_factor) - 1
-        last_omega = omega
-        last_offset = offset
-        for _ in range(self.num_rounds() - 1):
-            last_omega = last_omega ^ 2
-            last_offset = last_offset ^ 2
+        last_omega = self.omega ** (2 ** (self.num_rounds - 1))
+        last_offset = self.offset ** (2 ** (self.num_rounds - 1))
 
         # assert that last_omega has the right order
-        assert last_omega.inverse() == last_omega ^ (
-            len(last_codeword) - 1
-        ), "omega does not have right order"
+        if last_omega ** len(last_codeword) != 1:
+            raise FriError("omega does not have right order")
 
         # compute interpolant
-        last_domain = [
-            last_offset * (last_omega ^ i) for i in range(len(last_codeword))
-        ]
-        poly = Polynomial.interpolate_domain(last_domain, last_codeword)
-        # coefficients = intt(last_omega, last_codeword)
-        # poly = Polynomial(coefficients).scale(last_offset.inverse())
+        last_domain = [last_offset * (last_omega**i) for i in range(len(last_codeword))]
+        poly = Polynomial.interpolate(last_domain, last_codeword)
 
-        # verify by  evaluating
-        assert (
-            poly.evaluate_domain(last_domain) == last_codeword
-        ), "re-evaluated codeword does not match original!"
-        if poly.degree() > degree:
-            print(
+        # check if it is low degree
+        degree = len(last_codeword) // self.expansion_factor - 1
+        if poly.degree > degree:
+            raise FriError(
                 "last codeword does not correspond to polynomial of low enough degree"
             )
-            print("observed degree:", poly.degree())
-            print("but should be:", degree)
-            return False
 
         # get indices
         top_level_indices = self.sample_indices(
             proof_stream.verifier_fiat_shamir(),
             self.domain_length >> 1,
-            self.domain_length >> (self.num_rounds() - 1),
+            self.domain_length >> (self.num_rounds - 1),
             self.num_colinearity_tests,
         )
 
+        # Unwind `query()` loop
+        omega = self.omega
+        offset = self.offset
+        domain_length = self.domain_length
+        polynomial_values = []
         # for every round, check consistency of subsequent layers
-        for r in range(0, self.num_rounds() - 1):
-
+        for r in range(0, self.num_rounds - 1):
             # fold c indices
-            c_indices = [
-                index % (self.domain_length >> (r + 1)) for index in top_level_indices
-            ]
-
-            # infer a and b indices
-            a_indices = [index for index in c_indices]
-            b_indices = [index + (self.domain_length >> (r + 1)) for index in a_indices]
+            c_indices = [index % (domain_length // 2) for index in top_level_indices]
+            a_indices = c_indices
+            b_indices = [index + domain_length // 2 for index in c_indices]
 
             # read values and check colinearity
-            aa = []
-            bb = []
-            cc = []
             for s in range(self.num_colinearity_tests):
-                (ay, by, cy) = proof_stream.pull()
-                aa += [ay]
-                bb += [by]
-                cc += [cy]
+                colinearity_check = cast(ColinearityCheck, proof_stream.pull())
+                # colinearity check
+                ax = offset * (omega ** a_indices[s])
+                bx = offset * (omega ** b_indices[s])
+                cx = alphas[r]
+                ay, by, cy = colinearity_check.codewords
+
+                if not Polynomial.is_colinear([(ax, ay), (bx, by), (cx, cy)]):
+                    raise FriError("colinearity check failure")
+
+                # verify authentication paths
+                proofs = colinearity_check.proofs
+                if not Merkle.verify(roots[r], a_indices[s], proofs.a, ay):
+                    raise FriError(
+                        "merkle authentication path verification fails for a"
+                    )
+                if not Merkle.verify(roots[r], b_indices[s], proofs.b, by):
+                    raise FriError(
+                        "merkle authentication path verification fails for b"
+                    )
+                if not Merkle.verify(roots[r + 1], c_indices[s], proofs.c, cy):
+                    raise FriError(
+                        "merkle authentication path verification fails for c"
+                    )
 
                 # record top-layer values for later verification
                 if r == 0:
                     polynomial_values += [(a_indices[s], ay), (b_indices[s], by)]
 
-                # colinearity check
-                ax = offset * (omega ^ a_indices[s])
-                bx = offset * (omega ^ b_indices[s])
-                cx = alphas[r]
-                if not test_colinearity([(ax, ay), (bx, by), (cx, cy)]):
-                    print("colinearity check failure")
-                    return False
+            omega = omega**2
+            offset = offset**2
+            domain_length //= 2
 
-            # verify authentication paths
-            for i in range(self.num_colinearity_tests):
-                path = proof_stream.pull()
-                if not Merkle.verify(roots[r], a_indices[i], path, aa[i]):
-                    print("merkle authentication path verification fails for aa")
-                    return False
-                path = proof_stream.pull()
-                if not Merkle.verify(roots[r], b_indices[i], path, bb[i]):
-                    print("merkle authentication path verification fails for bb")
-                    return False
-                path = proof_stream.pull()
-                if not Merkle.verify(roots[r + 1], c_indices[i], path, cc[i]):
-                    print("merkle authentication path verification fails for cc")
-                    return False
-
-            # square omega and offset to prepare for next round
-            omega = omega ^ 2
-            offset = offset ^ 2
-
-        # all checks passed
-        return True
+        return polynomial_values

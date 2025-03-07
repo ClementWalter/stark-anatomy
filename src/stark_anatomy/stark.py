@@ -49,7 +49,7 @@ class Stark:
         self.generator = self.field.generator()
         self.omega = self.field.primitive_nth_root(fri_domain_length)
         self.omicron = self.field.primitive_nth_root(omicron_domain_length)
-        self.omicron_domain = [self.omicron ^ i for i in range(omicron_domain_length)]
+        self.omicron_domain = [self.omicron**i for i in range(omicron_domain_length)]
 
         self.fri = Fri(
             self.generator,
@@ -88,7 +88,7 @@ class Stark:
     def boundary_zerofiers(self, boundary):
         zerofiers = []
         for s in range(self.num_registers):
-            points = [self.omicron ^ c for c, r, v in boundary if r == s]
+            points = [self.omicron**c for c, r, v in boundary if r == s]
             zerofiers = zerofiers + [Polynomial.zerofier_domain(points)]
         return zerofiers
 
@@ -96,17 +96,15 @@ class Stark:
         interpolants = []
         for s in range(self.num_registers):
             points = [(c, v) for c, r, v in boundary if r == s]
-            domain = [self.omicron ^ c for c, v in points]
+            domain = [self.omicron**c for c, v in points]
             values = [v for c, v in points]
-            interpolants = interpolants + [
-                Polynomial.interpolate_domain(domain, values)
-            ]
+            interpolants = interpolants + [Polynomial.interpolate(domain, values)]
         return interpolants
 
     def boundary_quotient_degree_bounds(self, randomized_trace_length, boundary):
         randomized_trace_degree = randomized_trace_length - 1
         return [
-            randomized_trace_degree - bz.degree()
+            randomized_trace_degree - bz.degree
             for bz in self.boundary_zerofiers(boundary)
         ]
 
@@ -128,12 +126,12 @@ class Stark:
             ]
 
         # interpolate
-        trace_domain = [self.omicron ^ i for i in range(len(trace))]
+        trace_domain = [self.omicron**i for i in range(len(trace))]
         trace_polynomials = []
         for s in range(self.num_registers):
             single_trace = [trace[c][s] for c in range(len(trace))]
             trace_polynomials = trace_polynomials + [
-                Polynomial.interpolate_domain(trace_domain, single_trace)
+                Polynomial.interpolate(trace_domain, single_trace)
             ]
 
         # subtract boundary interpolants and divide out boundary zerofiers
@@ -145,12 +143,10 @@ class Stark:
             boundary_quotients += [quotient]
 
         # commit to boundary quotients
-        fri_domain = self.fri.eval_domain()
         boundary_quotient_codewords = []
-        boundary_quotient_Merkle_roots = []
         for s in range(self.num_registers):
             boundary_quotient_codewords = boundary_quotient_codewords + [
-                boundary_quotients[s].evaluate_domain(fri_domain)
+                boundary_quotients[s].evaluate_domain(self.fri.domain)
             ]
             merkle_root = Merkle.commit(boundary_quotient_codewords[s])
             proof_stream.push(merkle_root)
@@ -177,7 +173,7 @@ class Stark:
                 for i in range(self.max_degree(transition_constraints) + 1)
             ]
         )
-        randomizer_codeword = randomizer_polynomial.evaluate_domain(fri_domain)
+        randomizer_codeword = randomizer_polynomial.evaluate_domain(self.fri.domain)
         randomizer_root = Merkle.commit(randomizer_codeword)
         proof_stream.push(randomizer_root)
 
@@ -191,7 +187,7 @@ class Stark:
         )
 
         assert [
-            tq.degree() for tq in transition_quotients
+            tq.degree for tq in transition_quotients
         ] == self.transition_quotient_degree_bounds(
             transition_constraints
         ), "transition quotient degrees do not match with expectation"
@@ -207,14 +203,14 @@ class Stark:
                 max_degree
                 - self.transition_quotient_degree_bounds(transition_constraints)[i]
             )
-            terms += [(x ^ shift) * transition_quotients[i]]
+            terms += [(x**shift) * transition_quotients[i]]
         for i in range(self.num_registers):
             terms += [boundary_quotients[i]]
             shift = (
                 max_degree
                 - self.boundary_quotient_degree_bounds(len(trace), boundary)[i]
             )
-            terms += [(x ^ shift) * boundary_quotients[i]]
+            terms += [(x**shift) * boundary_quotients[i]]
 
         # take weighted sum
         # combination = sum(weights[i] * terms[i] for all i)
@@ -325,11 +321,11 @@ class Stark:
             current_index = indices[i]  # do need i
 
             # get trace values by applying a correction to the boundary quotient values (which are the leafs)
-            domain_current_index = self.generator * (self.omega ^ current_index)
+            domain_current_index = self.generator * (self.omega**current_index)
             next_index = (
                 current_index + self.expansion_factor
             ) % self.fri.domain_length
-            domain_next_index = self.generator * (self.omega ^ next_index)
+            domain_next_index = self.generator * (self.omega**next_index)
             current_trace = [self.field.zero for s in range(self.num_registers)]
             next_trace = [self.field.zero for s in range(self.num_registers)]
             for s in range(self.num_registers):
@@ -362,7 +358,7 @@ class Stark:
                     self.max_degree(transition_constraints)
                     - self.transition_quotient_degree_bounds(transition_constraints)[s]
                 )
-                terms += [quotient * (domain_current_index ^ shift)]
+                terms += [quotient * (domain_current_index**shift)]
             for s in range(self.num_registers):
                 bqv = leafs[s][current_index]  # boundary quotient value
                 terms += [bqv]
@@ -372,7 +368,7 @@ class Stark:
                         randomized_trace_length, boundary
                     )[s]
                 )
-                terms += [bqv * (domain_current_index ^ shift)]
+                terms += [bqv * (domain_current_index**shift)]
             combination = reduce(
                 lambda a, b: a + b,
                 [terms[j] * weights[j] for j in range(len(terms))],

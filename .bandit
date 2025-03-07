@@ -1,0 +1,3 @@
+[bandit]
+exclude = src/tests
+skips = B301,B403

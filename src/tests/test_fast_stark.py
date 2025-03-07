@@ -43,16 +43,12 @@ class TestFastStark:
             )
 
             # verify
-            verdict = stark.verify(proof, air, boundary, transition_zerofier_root)
-
-            assert verdict, "valid stark proof fails to verify"
+            assert stark.verify(proof, air, boundary, transition_zerofier_root)
 
             # verify false claim
             output_element_ = output_element + field.one
             boundary_ = rp.boundary_constraints(output_element_)
-            verdict = stark.verify(proof, air, boundary_, transition_zerofier_root)
-
-            assert not verdict, "invalid stark proof verifies"
+            assert not stark.verify(proof, air, boundary_, transition_zerofier_root)
 
             # prove with false witness
             cycle = 1 + (int(os.urandom(1)[0]) % len(trace) - 1)
@@ -65,5 +61,4 @@ class TestFastStark:
                 trace, air, boundary, transition_zerofier, transition_zerofier_codeword
             )
 
-            verdict = stark.verify(proof, air, boundary, transition_zerofier_root)
-            assert not verdict, "STARK produced from false witness verifies :("
+            assert not stark.verify(proof, air, boundary, transition_zerofier_root)

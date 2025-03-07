@@ -153,7 +153,7 @@ class RescuePrime:
             ]
         ]
 
-    def hash(self, input_element):
+    def hash(self, input_element: FieldElement) -> FieldElement:
         # absorb
         state = [input_element] + [self.field.zero] * (self.m - 1)
 
@@ -163,9 +163,9 @@ class RescuePrime:
             # forward half-round
             # S-box
             for i in range(self.m):
-                state[i] = state[i] ^ self.alpha
+                state[i] = state[i] ** self.alpha
             # matrix
-            temp = [self.field.zero for i in range(self.m)]
+            temp = [self.field.zero for _ in range(self.m)]
             for i in range(self.m):
                 for j in range(self.m):
                     temp[i] = temp[i] + self.MDS[i][j] * state[j]
@@ -178,7 +178,7 @@ class RescuePrime:
             # backward half-round
             # S-box
             for i in range(self.m):
-                state[i] = state[i] ^ self.alphainv
+                state[i] = state[i] ** self.alphainv
             # matrix
             temp = [self.field.zero for i in range(self.m)]
             for i in range(self.m):
@@ -193,7 +193,7 @@ class RescuePrime:
         # squeeze
         return state[0]
 
-    def trace(self, input_element):
+    def trace(self, input_element: FieldElement) -> list[list[FieldElement]]:
         trace = []
 
         # absorb
@@ -208,9 +208,9 @@ class RescuePrime:
             # forward half-round
             # S-box
             for i in range(self.m):
-                state[i] = state[i] ^ self.alpha
+                state[i] = state[i] ** self.alpha
             # matrix
-            temp = [self.field.zero for i in range(self.m)]
+            temp = [self.field.zero for _ in range(self.m)]
             for i in range(self.m):
                 for j in range(self.m):
                     temp[i] = temp[i] + self.MDS[i][j] * state[j]
@@ -223,9 +223,9 @@ class RescuePrime:
             # backward half-round
             # S-box
             for i in range(self.m):
-                state[i] = state[i] ^ self.alphainv
+                state[i] = state[i] ** self.alphainv
             # matrix
-            temp = [self.field.zero for i in range(self.m)]
+            temp = [self.field.zero for _ in range(self.m)]
             for i in range(self.m):
                 for j in range(self.m):
                     temp[i] = temp[i] + self.MDS[i][j] * state[j]
@@ -238,49 +238,43 @@ class RescuePrime:
             # record state at this point, with explicit copy
             trace += [[s for s in state]]
 
-        # squeeze
-        # output = state[0]
-
         return trace
 
-    def boundary_constraints(self, output_element):
-        constraints = []
+    def boundary_constraints(
+        self, output_element: FieldElement
+    ) -> list[tuple[int, int, FieldElement]]:
+        return [
+            # at start, capacity is zero
+            (0, 1, self.field.zero),
+            # at end, rate part is the given output element
+            (self.N, 0, output_element),
+        ]
 
-        # at start, capacity is zero
-        constraints += [(0, 1, self.field.zero)]
-
-        # at end, rate part is the given output element
-        constraints += [(self.N, 0, output_element)]
-
-        return constraints
-
-    def round_constants_polynomials(self, omicron):
+    def round_constants_polynomials(
+        self, omicron: FieldElement
+    ) -> tuple[list[MPolynomial], list[MPolynomial]]:
         first_step_constants = []
         for i in range(self.m):
-            domain = [omicron ^ r for r in range(0, self.N)]
+            domain = [omicron**r for r in range(0, self.N)]
             values = [
                 self.round_constants[2 * r * self.m + i] for r in range(0, self.N)
             ]
-            univariate = Polynomial.interpolate_domain(domain, values)
+            univariate = Polynomial.interpolate(domain, values)
             multivariate = MPolynomial.lift(univariate, 0)
             first_step_constants += [multivariate]
         second_step_constants = []
         for i in range(self.m):
-            domain = [omicron ^ r for r in range(0, self.N)]
-            values = [self.field.zero] * self.N
-            # for r in range(self.N):
-            #    print("len(round_constants):", len(self.round_constants), " but grabbing index:", 2*r*self.m+self.m+i, "for r=", r, "for m=", self.m, "for i=", i)
-            #    values[r] = self.round_constants[2*r*self.m + self.m + i]
+            domain = [omicron**r for r in range(0, self.N)]
             values = [
                 self.round_constants[2 * r * self.m + self.m + i] for r in range(self.N)
             ]
-            univariate = Polynomial.interpolate_domain(domain, values)
+            univariate = Polynomial.interpolate(domain, values)
             multivariate = MPolynomial.lift(univariate, 0)
             second_step_constants += [multivariate]
 
         return first_step_constants, second_step_constants
 
-    def transition_constraints(self, omicron):
+    def transition_constraints(self, omicron: FieldElement) -> list[MPolynomial]:
         # get polynomials that interpolate through the round constants
         first_step_constants, second_step_constants = self.round_constants_polynomials(
             omicron
@@ -297,7 +291,7 @@ class RescuePrime:
             lhs = MPolynomial.constant(self.field.zero)
             for k in range(self.m):
                 lhs = lhs + MPolynomial.constant(self.MDS[i][k]) * (
-                    previous_state[k] ^ self.alpha
+                    previous_state[k] ** self.alpha
                 )
             lhs = lhs + first_step_constants[i]
 
@@ -308,15 +302,17 @@ class RescuePrime:
                 rhs = rhs + MPolynomial.constant(self.MDSinv[i][k]) * (
                     next_state[k] - second_step_constants[k]
                 )
-            rhs = rhs ^ self.alpha
+            rhs = rhs**self.alpha
 
             # equate left and right hand sides
             air += [lhs - rhs]
 
         return air
 
-    def randomizer_freedom(self, omicron, num_randomizers):
-        domain = [omicron ^ i for i in range(self.N, self.N + num_randomizers)]
+    def randomizer_freedom(
+        self, omicron: FieldElement, num_randomizers: int
+    ) -> MPolynomial:
+        domain = [omicron**i for i in range(self.N, self.N + num_randomizers)]
         zerofier = Polynomial.zerofier_domain(domain)
         multivariate_zerofier = MPolynomial.lift(zerofier, 0)
         return multivariate_zerofier

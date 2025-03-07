@@ -48,7 +48,7 @@ class TestRescuePrime:
             for air_poly in rp.transition_constraints(omicron):
                 previous_state = [trace[o][0], trace[o][1]]
                 next_state = [trace[o + 1][0], trace[o + 1][1]]
-                point = [omicron ^ o] + previous_state + next_state
+                point = [omicron**o] + previous_state + next_state
                 assert air_poly.evaluate(point) == rp.field.zero
 
         # insert errors into trace, to make sure errors get noticed
@@ -88,7 +88,7 @@ class TestRescuePrime:
                 for air_poly in rp.transition_constraints(omicron):
                     previous_state = [trace[o][0], trace[o][1]]
                     next_state = [trace[o + 1][0], trace[o + 1][1]]
-                    point = [omicron ^ o] + previous_state + next_state
+                    point = [omicron**o] + previous_state + next_state
                     if air_poly.evaluate(point) != rp.field.zero:
                         error_got_noticed = True
 
