@@ -1,0 +1,27 @@
+{
+  "cSpell.words": [
+    "alphainv",
+    "arithmetize",
+    "coeffs",
+    "colinearity",
+    "hadamard",
+    "interpolants",
+    "intt",
+    "isort",
+    "jekyll",
+    "keygen",
+    "mathjax",
+    "ninv",
+    "rpsss",
+    "RPSSS",
+    "shamir",
+    "Sinv",
+    "Tukey",
+    "xgcd",
+    "zerofier",
+    "zerofiers"
+  ],
+  "python.testing.pytestArgs": ["src"],
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestEnabled": true
+}

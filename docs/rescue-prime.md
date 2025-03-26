@@ -1,36 +1,66 @@
 # Anatomy of a STARK, Part 5: A Rescue-Prime STARK
 
-This part of the tutorial puts the tools developed in the previous parts together to build a concretely useful STARK proof system. This application produces a STARK proof of correct evaluation of the Rescue-Prime hash function on a secret input with a known output. It is concretely useful because the resulting non-interactive proof doubles as a post-quantum signature scheme.
+This part of the tutorial puts the tools developed in the previous parts
+together to build a concretely useful STARK proof system. This application
+produces a STARK proof of correct evaluation of the Rescue-Prime hash function
+on a secret input with a known output. It is concretely useful because the
+resulting non-interactive proof doubles as a post-quantum signature scheme.
 
 ## Rescue-Prime
 
-[Rescue-Prime](https://eprint.iacr.org/2020/1143.pdf) is an arithmetization-oriented hash function, meaning that it has a compact description in terms of AIR. It is a sponge function constructed from the Rescue-XLIX permutation $f_{\mathrm{R}^{\mathrm{XLIX}}} : \mathbb{F}^m \rightarrow \mathbb{F}^m$, consisting of several almost-identical rounds. Every round consists of six steps:
- 1. Forward S-box. Every element of the state is raised to the power $\alpha$, where $\alpha$ is the smallest invertible power.
- 2. MDS. The vector of state elements is multiplied by a matrix with special properties.
- 3. Round constants. Pre-defined constants are added to every element of the state.
- 4. Backward S-box. Every element of the state is raised to the power $\alpha^{-1}$, which is the integer whose power map is the inverse of $x \mapsto x^\alpha$.
- 5. MDS. The vector of state elements is multiplied by a matrix with special properties.
- 6. Round constants. Pre-defined constants are added to every element of the state.
+[Rescue-Prime](https://eprint.iacr.org/2020/1143.pdf) is an
+arithmetization-oriented hash function, meaning that it has a compact
+description in terms of AIR. It is a sponge function constructed from the
+Rescue-XLIX permutation
+$f_{\mathrm{R}^{\mathrm{XLIX}}} : \mathbb{F}^m \rightarrow \mathbb{F}^m$,
+consisting of several almost-identical rounds. Every round consists of six
+steps:
+
+1.  Forward S-box. Every element of the state is raised to the power $\alpha$,
+    where $\alpha$ is the smallest invertible power.
+2.  MDS. The vector of state elements is multiplied by a matrix with special
+    properties.
+3.  Round constants. Pre-defined constants are added to every element of the
+    state.
+4.  Backward S-box. Every element of the state is raised to the power
+    $\alpha^{-1}$, which is the integer whose power map is the inverse of
+    $x \mapsto x^\alpha$.
+5.  MDS. The vector of state elements is multiplied by a matrix with special
+    properties.
+6.  Round constants. Pre-defined constants are added to every element of the
+    state.
 
 ![Rescue-XLIX round function](graphics/rescue-prime-round.svg)
 
-The rounds are *almost* identical but not quite because constants are different in every rounds. While the Backward S-box step seems like a high degree operation, as we shall see, all six steps of the Rescue-XLIX round function can be captured by non-deterministic transition constraints of degree $\alpha$. 
+The rounds are _almost_ identical but not quite because constants are different
+in every rounds. While the Backward S-box step seems like a high degree
+operation, as we shall see, all six steps of the Rescue-XLIX round function can
+be captured by non-deterministic transition constraints of degree $\alpha$.
 
-Once the Rescue-XLIX permutation is defined, one obtains Rescue-Prime by instantiating a sponge function with it. In this construction, input field elements are absorbed into the top $r$ elements of the state in between permutations. After one final permutation, the top $r$ elements are read out. The Rescue-Prime hash digest consists of these $r$ elements.
+Once the Rescue-XLIX permutation is defined, one obtains Rescue-Prime by
+instantiating a sponge function with it. In this construction, input field
+elements are absorbed into the top $r$ elements of the state in between
+permutations. After one final permutation, the top $r$ elements are read out.
+The Rescue-Prime hash digest consists of these $r$ elements.
 
 ![Rescue-Prime sponge construction](graphics/rescue-prime-sponge.svg)
 
 For the present STARK proof the following parameters are used:
- - prime field of $p = 407 \cdot 2^{119} + 1$ elements
- - $\alpha = 3$ and $\alpha^{-1} = 180331931428153586757283157844700080811$
- - $m = 2$
- - $r = 1$
 
-Furthermore, the input to the hash computation will be a single field element. So in particular, there will be only one round of absorbing and one application of the permutation.
+- prime field of $p = 407 \cdot 2^{119} + 1$ elements
+- $\alpha = 3$ and $\alpha^{-1} = 180331931428153586757283157844700080811$
+- $m = 2$
+- $r = 1$
+
+Furthermore, the input to the hash computation will be a single field element.
+So in particular, there will be only one round of absorbing and one application
+of the permutation.
 
 ## Implementation
 
-The Rescue-Prime [paper](https://eprint.iacr.org/2020/1143.pdf) provides a nearly complete reference implementation. However, the code here is tailored to this one application.
+The Rescue-Prime [paper](https://eprint.iacr.org/2020/1143.pdf) provides a
+nearly complete reference implementation. However, the code here is tailored to
+this one application.
 
 ```python
 class RescuePrime:
@@ -162,7 +192,7 @@ class RescuePrime:
 
         # permutation
         for r in range(self.N):
-            
+
             # forward half-round
             # S-box
             for i in range(self.m):
@@ -193,15 +223,42 @@ class RescuePrime:
 
 ### Rescue-Prime AIR
 
-The transition constraints for a single round of the Rescue-XLIX permutation are obtained by expressing the state values in the middle of the round in terms of the state values at the beginning, and again in terms of the state values at the end, and then equating both expressions. Specifically, let $\boldsymbol{s}_ {i}$ denote the state values at the beginning of round $i$, let $\boldsymbol{c}_ {2i}$ and $\boldsymbol{c}_{2i+1}$ be round constants, let $M$ be the MDS matrix, and let superscript denote element-wise powering. Then the transition of a single round is captured by the equation:
+The transition constraints for a single round of the Rescue-XLIX permutation are
+obtained by expressing the state values in the middle of the round in terms of
+the state values at the beginning, and again in terms of the state values at the
+end, and then equating both expressions. Specifically, let $\boldsymbol{s}_ {i}$
+denote the state values at the beginning of round $i$, let
+$\boldsymbol{c}_ {2i}$ and $\boldsymbol{c}_{2i+1}$ be round constants, let $M$
+be the MDS matrix, and let superscript denote element-wise powering. Then the
+transition of a single round is captured by the equation:
 
-$$ M (\boldsymbol{s}_i^\alpha) + \boldsymbol{c}_{2i} = \left(M^{-1} (\boldsymbol{s}_{i+1} - \boldsymbol{c}_{2i+1})\right)^\alpha \enspace $$
+$$
+M (\boldsymbol{s}_i^\alpha) + \boldsymbol{c}_{2i} = \left(M^{-1}
+(\boldsymbol{s}_{i+1} - \boldsymbol{c}_{2i+1})\right)^\alpha \enspace
+$$
 
-To be used in a STARK, transition constraints cannot depend on the round. In other words, what is needed is a single equation that describes all rounds, not just the $i$th round. Let $\boldsymbol{X}$ denote the vector of variables representing the current state (beginning of the round), and $\boldsymbol{Y}$ denote the vector of variables represnting the next state (at the end of the round). Furthermore, let $\mathbf{f}_ {\boldsymbol{c}_ {2i}}(W)$ denote the vector of $m$ polynomials that take the value $\boldsymbol{c}_ {2i}$ on $\omicron^i$, and analogously for $\mathbf{f}_ {\boldsymbol{c}_{2i+1}}(W)$. Suppose without loss of generality that the execution trace will be interpolated on the domain $\lbrace \omicron^i \vert 0 \leq i \leq T\rbrace$ for some $T$. Then the above family of arithmetic transition constraints gives rise to the following equation capturing the same transition conditions:
+To be used in a STARK, transition constraints cannot depend on the round. In
+other words, what is needed is a single equation that describes all rounds, not
+just the $i$th round. Let $\boldsymbol{X}$ denote the vector of variables
+representing the current state (beginning of the round), and $\boldsymbol{Y}$
+denote the vector of variables represnting the next state (at the end of the
+round). Furthermore, let $\mathbf{f}_ {\boldsymbol{c}_ {2i}}(W)$ denote the
+vector of $m$ polynomials that take the value $\boldsymbol{c}_ {2i}$ on
+$\omicron^i$, and analogously for $\mathbf{f}_ {\boldsymbol{c}_{2i+1}}(W)$.
+Suppose without loss of generality that the execution trace will be interpolated
+on the domain $\lbrace \omicron^i \vert 0 \leq i \leq T\rbrace$ for some $T$.
+Then the above family of arithmetic transition constraints gives rise to the
+following equation capturing the same transition conditions:
 
-$$ M(\boldsymbol{X}^\alpha) + \mathbf{f}_ {\boldsymbol{c}_ {2i}}(W) = \left(M^{-1}(\boldsymbol{Y} - \mathbf{f}_ {\boldsymbol{c}_{2i+1}}(W))\right)^\alpha $$
+$$
+M(\boldsymbol{X}^\alpha) + \mathbf{f}_ {\boldsymbol{c}_ {2i}}(W) =
+\left(M^{-1}(\boldsymbol{Y} - \mathbf{f}_
+{\boldsymbol{c}_{2i+1}}(W))\right)^\alpha
+$$
 
-The transition constraint polynomial is obtained by moving all terms to the left-hand side and dropping the equation to zero. Note that there are $2m+1$ variables, corresponding to $m = \mathsf{w}$ registers.
+The transition constraint polynomial is obtained by moving all terms to the
+left-hand side and dropping the equation to zero. Note that there are $2m+1$
+variables, corresponding to $m = \mathsf{w}$ registers.
 
 ```python
     def round_constants_polynomials( self, omicron ):
@@ -257,9 +314,18 @@ The transition constraint polynomial is obtained by moving all terms to the left
         return air
 ```
 
-The boundary constraints are a lot simpler. At the beginning, the first state element is the unknown secret and the second state element is zero because the sponge construction defines it as such. At the end (after all $N$ rounds or $T$ cycles), the first state element is the one element of known hash digest $[h]$, and the second state element is unconstrained. Note that this second state element must be kept secret to be secure -- otherwise the attacker can invert the permutation. This description gives rise to the following set $\mathcal{B}$ of triples $(c, r, e) \in \lbrace 0, \ldots, T \rbrace \times \lbrace 0, \ldots, \mathsf{w}-1 \rbrace \times \mathbb{F}$:
- - $(0, 1, 0)$
- - $(T, 0, h)$.
+The boundary constraints are a lot simpler. At the beginning, the first state
+element is the unknown secret and the second state element is zero because the
+sponge construction defines it as such. At the end (after all $N$ rounds or $T$
+cycles), the first state element is the one element of known hash digest $[h]$,
+and the second state element is unconstrained. Note that this second state
+element must be kept secret to be secure -- otherwise the attacker can invert
+the permutation. This description gives rise to the following set $\mathcal{B}$
+of triples
+$(c, r, e) \in \lbrace 0, \ldots, T \rbrace \times \lbrace 0, \ldots, \mathsf{w}-1 \rbrace \times \mathbb{F}$:
+
+- $(0, 1, 0)$
+- $(T, 0, h)$.
 
 ```python
     def boundary_constraints( self, output_element ):
@@ -274,7 +340,10 @@ The boundary constraints are a lot simpler. At the beginning, the first state el
         return constraints
 ```
 
-The piece of the arithmetization is the witness, which for STARKs is the execution trace. In the case of this particular computation, the trace is the collection of states after every round, in addition to the state at the very beginning.
+The piece of the arithmetization is the witness, which for STARKs is the
+execution trace. In the case of this particular computation, the trace is the
+collection of states after every round, in addition to the state at the very
+beginning.
 
 ```python
     def trace( self, input_element ):
@@ -288,7 +357,7 @@ The piece of the arithmetization is the witness, which for STARKs is the executi
 
         # permutation
         for r in range(self.N):
-            
+
             # forward half-round
             # S-box
             for i in range(self.m):
@@ -312,7 +381,7 @@ The piece of the arithmetization is the witness, which for STARKs is the executi
                     temp[i] = temp[i] + self.MDS[i][j] * state[j]
             # constants
             state = [temp[i] + self.round_constants[2*r*self.m+self.m+i] for i in range(self.m)]
-            
+
             # record state at this point, with explicit copy
             trace += [[s for s in state]]
 
@@ -321,11 +390,18 @@ The piece of the arithmetization is the witness, which for STARKs is the executi
 
 ## STARK-based Signatures
 
-A non-interactive zero-knowldge proof system can be transformed into a signature scheme. The catch is that it must be capable of proving knowledge of a solution to a cryptographically hard problem. STARKs can be used to prove arbitrarily complex computational statements. However, the whole point of Rescue-Prime is that it generates cryptographically hard problem instances in a STARK-friendly way -- concretely, with a compact AIR. So let's transform a STARK for Rescue-Prime into a signature scheme.
+A non-interactive zero-knowldge proof system can be transformed into a signature
+scheme. The catch is that it must be capable of proving knowledge of a solution
+to a cryptographically hard problem. STARKs can be used to prove arbitrarily
+complex computational statements. However, the whole point of Rescue-Prime is
+that it generates cryptographically hard problem instances in a STARK-friendly
+way -- concretely, with a compact AIR. So let's transform a STARK for
+Rescue-Prime into a signature scheme.
 
 ### Rescue-Prime STARK
 
-Producing a prover and verifier for STARK for Rescue-Prime consists of little more than linking together existing code snippets.
+Producing a prover and verifier for STARK for Rescue-Prime consists of little
+more than linking together existing code snippets.
 
 ```python
 
@@ -349,7 +425,7 @@ class RPSSS:
         transition_constraints = self.rp.transition_constraints(self.stark.omicron)
         boundary_constraints = self.rp.boundary_constraints(output_element)
         proof = self.stark.prove(trace, transition_constraints, boundary_constraints, proof_stream)
- 
+
         return proof
 
     def stark_verify( self, output_element, stark_proof, proof_stream ):
@@ -358,13 +434,21 @@ class RPSSS:
         return self.stark.verify(stark_proof, transition_constraints, boundary_constraints, proof_stream)
 ```
 
-Note the explicit argument concerning the proof stream. This needs to be a special object that simulates a *message-dependent* Fiat-Shamir transform, as opposed to a regular one.
+Note the explicit argument concerning the proof stream. This needs to be a
+special object that simulates a _message-dependent_ Fiat-Shamir transform, as
+opposed to a regular one.
 
 ### Message-Dependent Fiat-Shamir
 
-In order to transform a zero-knowledge proof system into a signature scheme, a non-interactive proof must be tied to the document that is being signed. Traditionally, the way to do this via Fiat-Shamir is to define the verifier's pseudorandom response as the hash digest of the document concatenated with the entire protocol transcript up until the point where its output is required.
+In order to transform a zero-knowledge proof system into a signature scheme, a
+non-interactive proof must be tied to the document that is being signed.
+Traditionally, the way to do this via Fiat-Shamir is to define the verifier's
+pseudorandom response as the hash digest of the document concatenated with the
+entire protocol transcript up until the point where its output is required.
 
-In terms of implementation, this requires a new proof stream object -- one that is aware of the document for which the signature is to be generated or verified. The next class achieves just this.
+In terms of implementation, this requires a new proof stream object -- one that
+is aware of the document for which the signature is to be generated or verified.
+The next class achieves just this.
 
 ```python
 
@@ -388,7 +472,10 @@ class SignatureProofStream(ProofStream):
 
 ### Signature Scheme
 
-At this point it is possible to define the key generation, signature generation, and signature verification functions that make up a signature scheme. Note that these functions are members of the Rescue-Prime STARK Signature Scheme (`RPSSS`) class whose definition started earlier.
+At this point it is possible to define the key generation, signature generation,
+and signature verification functions that make up a signature scheme. Note that
+these functions are members of the Rescue-Prime STARK Signature Scheme (`RPSSS`)
+class whose definition started earlier.
 
 ```python
 # class RPSSS:
@@ -407,18 +494,33 @@ At this point it is possible to define the key generation, signature generation,
         return self.stark_verify(pk, signature, sps)
 ```
 
-This code defines a *provably secure*[^1], *post-quantum* signature scheme that (almost) achieves a 128 bit security level. While this description sounds flattering, the scheme's performance metrics are much less so:
- - secret key size: 16 bytes (yay!)
- - public key size: 16 bytes (yay!)
- - signature size: **~133 kB**
- - keygen time: 0.01 seconds (acceptable)
- - signing time: **250 seconds**
- - verification time: **444 seconds**
+This code defines a _provably secure_[^1], _post-quantum_ signature scheme that
+(almost) achieves a 128 bit security level. While this description sounds
+flattering, the scheme's performance metrics are much less so:
 
-There might be a few optimizations available that can reduce the proof's size, such as merging common paths when opening a batch of Merkle leafs. However, these optimizations distract from the purpose of this tutorial, which is to highlight and explain the mathematics involved.
+- secret key size: 16 bytes (yay!)
+- public key size: 16 bytes (yay!)
+- signature size: **~133 kB**
+- keygen time: 0.01 seconds (acceptable)
+- signing time: **250 seconds**
+- verification time: **444 seconds**
 
-In terms of speed, a lot of the poor performance is due to using Python instead of a language that is closer to the hardware such as C or Rust. Python was chosen for the same reason -- to highlight and explain the maths. But the biggest performance gain in terms of speed is going to come from switching to faster algorithms for key operations. This is the topic of the next and last part of the tutorial.
+There might be a few optimizations available that can reduce the proof's size,
+such as merging common paths when opening a batch of Merkle leafs. However,
+these optimizations distract from the purpose of this tutorial, which is to
+highlight and explain the mathematics involved.
 
-[0](index) - [1](overview) - [2](basic-tools) - [3](fri) - [4](stark) - **5** - [6](faster)
+In terms of speed, a lot of the poor performance is due to using Python instead
+of a language that is closer to the hardware such as C or Rust. Python was
+chosen for the same reason -- to highlight and explain the maths. But the
+biggest performance gain in terms of speed is going to come from switching to
+faster algorithms for key operations. This is the topic of the next and last
+part of the tutorial.
 
-[^1]: More specifically, in the random oracle model, a successful signature-forger gives rise to an adversary who breaks the one-wayness of Rescue-Prime with polynomially related running time and success probability.
+[0](index) - [1](overview) - [2](basic-tools) - [3](fri) - [4](stark) - **5** -
+[6](faster)
+
+[^1]:
+    More specifically, in the random oracle model, a successful signature-forger
+    gives rise to an adversary who breaks the one-wayness of Rescue-Prime with
+    polynomially related running time and success probability.

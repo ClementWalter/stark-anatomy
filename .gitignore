@@ -1,2 +1,6 @@
 docs/_site/*
 docs/_site/
+
+__pycache__/
+*.swp
+.hypothesis
